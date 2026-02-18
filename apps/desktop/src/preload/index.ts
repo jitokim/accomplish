@@ -61,6 +61,10 @@ const accomplishAPI = {
     ipcRenderer.invoke('opencode:auth:openai:status'),
   loginOpenAiWithChatGpt: (): Promise<{ ok: boolean; openedUrl?: string }> =>
     ipcRenderer.invoke('opencode:auth:openai:login'),
+  startOpenCodeBrowserAuthLogin: (
+    provider: 'openai' | 'google',
+  ): Promise<{ ok: boolean; openedUrl?: string; detectedUrl?: string }> =>
+    ipcRenderer.invoke('opencode:auth:browser:login', provider),
 
   // API Key management (new simplified handlers)
   hasApiKey: (): Promise<boolean> => ipcRenderer.invoke('api-key:exists'),
@@ -400,6 +404,26 @@ const accomplishAPI = {
     const listener = (_: unknown, data: { providerId: string; message: string }) => callback(data);
     ipcRenderer.on('auth:error', listener);
     return () => ipcRenderer.removeListener('auth:error', listener);
+  },
+  onOpenCodeBrowserAuthProgress: (
+    callback: (data: {
+      state: 'idle' | 'waiting_browser_auth' | 'polling' | 'success' | 'failed' | 'timeout';
+      provider: 'openai' | 'google';
+      message?: string;
+      url?: string;
+    }) => void,
+  ) => {
+    const listener = (
+      _: unknown,
+      data: {
+        state: 'idle' | 'waiting_browser_auth' | 'polling' | 'success' | 'failed' | 'timeout';
+        provider: 'openai' | 'google';
+        message?: string;
+        url?: string;
+      },
+    ) => callback(data);
+    ipcRenderer.on('opencode:auth:browser:progress', listener);
+    return () => ipcRenderer.removeListener('opencode:auth:browser:progress', listener);
   },
 
   logEvent: (payload: { level?: string; message: string; context?: Record<string, unknown> }) =>

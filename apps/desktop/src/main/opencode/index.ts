@@ -30,7 +30,12 @@ export {
   ACCOMPLISH_AGENT_NAME,
 } from './config-generator';
 
-export { loginOpenAiWithChatGpt } from './auth-browser';
+export {
+  loginOpenAiWithChatGpt,
+  loginWithBrowser,
+  type BrowserAuthProvider,
+  type BrowserAuthProgress,
+} from './auth-browser';
 
 import { createTaskManager, type TaskManagerAPI } from '@accomplish_ai/agent-core';
 import {

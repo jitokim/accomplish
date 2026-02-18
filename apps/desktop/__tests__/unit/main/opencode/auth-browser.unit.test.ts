@@ -246,6 +246,24 @@ describe('OAuthBrowserFlow', () => {
       expect(result.openedUrl).toContain('https://auth.openai.com');
     });
 
+    it('should parse URL when ANSI and chunked output are mixed', async () => {
+      const startPromise = oauthBrowserFlow.start();
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockPtyInstance.simulateData('\u001B[32mGo to:\u001B[0m https://auth.open');
+      mockPtyInstance.simulateData('ai.com/oauth?code=abc123\nWaiting for authentication...');
+
+      expect(mockShell.openExternal).toHaveBeenCalledWith(
+        'https://auth.openai.com/oauth?code=abc123',
+      );
+
+      mockPtyInstance.simulateExit(0);
+      const result = await startPromise;
+      expect(result.detectedUrl).toBe('https://auth.openai.com/oauth?code=abc123');
+    });
+
     it('should not open URL twice', async () => {
       const startPromise = oauthBrowserFlow.start();
 
@@ -286,9 +304,30 @@ describe('OAuthBrowserFlow', () => {
       await expect(startPromise).rejects.toThrow('exit 42');
     });
 
+    it('should reject with timeout when auth takes too long', async () => {
+      vi.useFakeTimers();
+
+      const progressEvents: Array<{ state: string }> = [];
+      const startPromise = oauthBrowserFlow.start({
+        timeoutMs: 50,
+        onProgress: (progress) => {
+          progressEvents.push({ state: progress.state });
+        },
+      });
+
+      const timeoutAssertion = expect(startPromise).rejects.toThrow('timed out');
+
+      await vi.advanceTimersByTimeAsync(60);
+
+      await timeoutAssertion;
+      expect(progressEvents.some((event) => event.state === 'timeout')).toBe(true);
+
+      vi.useRealTimers();
+    });
+
     it('should cancel previous flow before starting new one', async () => {
       // Start first flow
-      const firstPromise = oauthBrowserFlow.start();
+      const firstPromise = oauthBrowserFlow.start({ timeoutMs: 200 }).catch(() => undefined);
 
       // Wait for async setup
       await Promise.resolve();
@@ -304,7 +343,7 @@ describe('OAuthBrowserFlow', () => {
 
       // Start second flow - should cancel first
       // Don't await yet, just trigger it
-      oauthBrowserFlow.start();
+      const secondPromise = oauthBrowserFlow.start({ timeoutMs: 200 }).catch(() => undefined);
 
       // Wait a tick for cancel to be initiated
       await Promise.resolve();
@@ -312,9 +351,10 @@ describe('OAuthBrowserFlow', () => {
       // First PTY should have received Ctrl+C (cancellation signal)
       expect(firstPtyInstance.write).toHaveBeenCalledWith('\x03');
 
-      // Complete first flow so its promise resolves
+      // Complete both flows
       firstPtyInstance.simulateExit(1);
-      await expect(firstPromise).rejects.toThrow();
+      mockPtyInstance.simulateExit(0);
+      await Promise.all([firstPromise, secondPromise]);
     });
   });
 
@@ -325,13 +365,15 @@ describe('OAuthBrowserFlow', () => {
     });
 
     it('should send Ctrl+C to PTY', async () => {
-      oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup
       await Promise.resolve();
       await Promise.resolve();
 
       await oauthBrowserFlow.cancel();
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
 
       expect(mockPtyInstance.write).toHaveBeenCalledWith('\x03');
     });
@@ -340,13 +382,15 @@ describe('OAuthBrowserFlow', () => {
       const originalPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
 
-      oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup
       await Promise.resolve();
       await Promise.resolve();
 
       await oauthBrowserFlow.cancel();
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
 
       expect(mockPtyInstance.write).toHaveBeenCalledWith('Y\n');
 
@@ -356,7 +400,7 @@ describe('OAuthBrowserFlow', () => {
     it('should force kill if graceful exit times out', async () => {
       vi.useFakeTimers();
 
-      const _startPromise = oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup (using fake timers)
       await vi.advanceTimersByTimeAsync(10);
@@ -367,6 +411,8 @@ describe('OAuthBrowserFlow', () => {
       await vi.advanceTimersByTimeAsync(1100);
 
       await cancelPromise;
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
 
       expect(mockPtyInstance.kill).toHaveBeenCalled();
 
@@ -387,23 +433,44 @@ describe('OAuthBrowserFlow', () => {
 
       expect(oauthBrowserFlow.isInProgress()).toBe(false);
     });
+
+    it('should emit failed state when cancelled', async () => {
+      const progressStates: string[] = [];
+      const startPromise = oauthBrowserFlow.start({
+        onProgress: (progress) => {
+          progressStates.push(progress.state);
+        },
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const cancelPromise = oauthBrowserFlow.cancel();
+      mockPtyInstance.simulateExit(1);
+
+      await cancelPromise;
+      await expect(startPromise).rejects.toThrow();
+      expect(progressStates).toContain('failed');
+    });
   });
 
   describe('dispose()', () => {
     it('should kill active PTY', async () => {
-      oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup
       await Promise.resolve();
       await Promise.resolve();
 
       oauthBrowserFlow.dispose();
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
 
       expect(mockPtyInstance.kill).toHaveBeenCalled();
     });
 
     it('should be idempotent', async () => {
-      oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup
       await Promise.resolve();
@@ -411,6 +478,8 @@ describe('OAuthBrowserFlow', () => {
 
       // First dispose kills the PTY
       oauthBrowserFlow.dispose();
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
       expect(mockPtyInstance.kill).toHaveBeenCalledTimes(1);
 
       // Subsequent disposes should not throw or kill again
@@ -440,7 +509,7 @@ describe('OAuthBrowserFlow', () => {
 
   describe('error scenarios', () => {
     it('should handle PTY kill errors during cancel gracefully', async () => {
-      oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup
       await Promise.resolve();
@@ -452,10 +521,12 @@ describe('OAuthBrowserFlow', () => {
 
       // Should not throw
       await expect(oauthBrowserFlow.cancel()).resolves.not.toThrow();
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
     });
 
     it('should handle PTY kill errors during dispose gracefully', async () => {
-      oauthBrowserFlow.start();
+      const startPromise = oauthBrowserFlow.start();
 
       // Wait for async setup
       await Promise.resolve();
@@ -467,6 +538,8 @@ describe('OAuthBrowserFlow', () => {
 
       // Should not throw
       expect(() => oauthBrowserFlow.dispose()).not.toThrow();
+      mockPtyInstance.simulateExit(1);
+      await expect(startPromise).rejects.toThrow();
     });
 
     it('should redact sensitive data in error messages', async () => {

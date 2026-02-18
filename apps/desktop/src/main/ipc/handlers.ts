@@ -42,7 +42,7 @@ import {
 } from '@accomplish_ai/agent-core';
 import { getStorage } from '../store/storage';
 import { getOpenAiOauthStatus } from '@accomplish_ai/agent-core';
-import { loginOpenAiWithChatGpt } from '../opencode/auth-browser';
+import { loginOpenAiWithChatGpt, loginWithBrowser } from '../opencode/auth-browser';
 import type {
   ProviderId,
   ConnectedProvider,
@@ -990,6 +990,25 @@ export function registerIPCHandlers(): void {
     const result = await loginOpenAiWithChatGpt();
     return { ok: true, ...result };
   });
+
+  handle(
+    'opencode:auth:browser:login',
+    async (event: IpcMainInvokeEvent, provider: 'openai' | 'google' = 'openai') => {
+      const sender = event.sender;
+      const safeProvider = provider === 'google' ? 'google' : 'openai';
+
+      const result = await loginWithBrowser({
+        provider: safeProvider,
+        onProgress: (progress) => {
+          if (!sender.isDestroyed()) {
+            sender.send('opencode:auth:browser:progress', progress);
+          }
+        },
+      });
+
+      return { ok: true, ...result };
+    },
+  );
 
   handle('onboarding:complete', async (_event: IpcMainInvokeEvent) => {
     if (isE2ESkipAuthEnabled()) {

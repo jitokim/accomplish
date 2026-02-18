@@ -27,6 +27,14 @@ const OPENAI_OAUTH_FALLBACK_MODELS: Array<{ id: string; name: string }> = [
   { id: 'openai/gpt-5.1-codex-mini', name: 'GPT 5.1 Codex Mini' },
 ];
 
+type BrowserAuthState =
+  | 'idle'
+  | 'waiting_browser_auth'
+  | 'polling'
+  | 'success'
+  | 'failed'
+  | 'timeout';
+
 interface ClassicProviderFormProps {
   providerId: ProviderId;
   connectedProvider?: ConnectedProvider;
@@ -49,6 +57,9 @@ export function ClassicProviderForm({
   const [error, setError] = useState<string | null>(null);
   const [openAiBaseUrl, setOpenAiBaseUrl] = useState('');
   const [signingIn, setSigningIn] = useState(false);
+  const [browserAuthState, setBrowserAuthState] = useState<BrowserAuthState>('idle');
+  const [browserAuthUrl, setBrowserAuthUrl] = useState<string | null>(null);
+  const [browserAuthMessage, setBrowserAuthMessage] = useState<string | null>(null);
   const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; name: string }> | null>(
     null,
   );
@@ -63,6 +74,8 @@ export function ClassicProviderForm({
   const isConnected = connectedProvider?.connectionStatus === 'connected';
   const logoSrc = PROVIDER_LOGOS[providerId];
   const isOpenAI = providerId === 'openai';
+  const isGoogle = providerId === 'google';
+  const supportsBrowserAuth = isOpenAI || isGoogle;
 
   useEffect(() => {
     if (!isOpenAI) return;
@@ -163,34 +176,67 @@ export function ClassicProviderForm({
     }
   };
 
-  const handleChatGptSignIn = async () => {
+  const handleBrowserSignIn = async () => {
     setSigningIn(true);
     setError(null);
-    try {
-      const accomplish = getAccomplish();
-      await accomplish.loginOpenAiWithChatGpt();
-      const status = await accomplish.getOpenAiOauthStatus();
+    setBrowserAuthState('idle');
+    setBrowserAuthUrl(null);
+    setBrowserAuthMessage(null);
 
-      if (status.connected) {
-        // OAuth stores a refresh token — no API key is available for /v1/models.
-        // Use a hardcoded fallback list so the model dropdown works.
-        const defaultModelId = providerConfig?.defaultModelId ?? null;
-        const provider: ConnectedProvider = {
-          providerId,
-          connectionStatus: 'connected',
-          selectedModelId: defaultModelId,
-          credentials: {
-            type: 'oauth',
-            oauthProvider: 'chatgpt',
-          } as OAuthCredentials,
-          lastConnectedAt: new Date().toISOString(),
-          availableModels: OPENAI_OAUTH_FALLBACK_MODELS,
-        };
-        onConnect(provider);
+    const providerForAuth = isGoogle ? 'google' : 'openai';
+    const accomplish = getAccomplish();
+
+    const unsubscribe = accomplish.onOpenCodeBrowserAuthProgress?.((progress) => {
+      if (progress.provider !== providerForAuth) {
+        return;
       }
+
+      setBrowserAuthState(progress.state);
+      setBrowserAuthMessage(progress.message ?? null);
+      if (progress.url) {
+        setBrowserAuthUrl(progress.url);
+      }
+    });
+
+    try {
+      const result = await accomplish.startOpenCodeBrowserAuthLogin(providerForAuth);
+
+      if (result.detectedUrl && !browserAuthUrl) {
+        setBrowserAuthUrl(result.detectedUrl);
+      }
+
+      if (isOpenAI) {
+        const status = await accomplish.getOpenAiOauthStatus();
+        if (!status.connected) {
+          throw new Error(
+            'Browser auth completed but OpenAI connection is still missing. Retry or use API key.',
+          );
+        }
+      }
+
+      const defaultModelId = providerConfig?.defaultModelId ?? null;
+      const provider: ConnectedProvider = {
+        providerId,
+        connectionStatus: 'connected',
+        selectedModelId: defaultModelId,
+        credentials: {
+          type: 'oauth',
+          oauthProvider: isGoogle ? 'google' : 'chatgpt',
+        } as OAuthCredentials,
+        lastConnectedAt: new Date().toISOString(),
+        availableModels: isOpenAI ? OPENAI_OAUTH_FALLBACK_MODELS : staticModels,
+      };
+      setBrowserAuthState('success');
+      setBrowserAuthMessage('Authentication completed successfully.');
+      onConnect(provider);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed');
+      const message = err instanceof Error ? err.message : 'Sign-in failed';
+      setError(
+        `${message}\n\nNext steps: Retry login, open the URL manually, or copy logs from Debug settings.`,
+      );
+      setBrowserAuthState((prev) => (prev === 'timeout' ? 'timeout' : 'failed'));
     } finally {
+      unsubscribe?.();
       setSigningIn(false);
     }
   };
@@ -210,7 +256,7 @@ export function ClassicProviderForm({
         <div className="space-y-4">
           <button
             type="button"
-            onClick={handleChatGptSignIn}
+            onClick={handleBrowserSignIn}
             disabled={signingIn}
             data-testid="openai-oauth-signin"
             className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
@@ -218,6 +264,29 @@ export function ClassicProviderForm({
             <img src={PROVIDER_LOGOS['openai']} alt="" className="h-5 w-5 dark:invert" />
             {signingIn ? 'Signing in...' : 'Login with OpenAI'}
           </button>
+
+          {(browserAuthState !== 'idle' || browserAuthMessage || browserAuthUrl) && (
+            <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
+              <p>
+                {browserAuthMessage ||
+                  (browserAuthState === 'polling'
+                    ? 'Waiting for browser authentication...'
+                    : 'Preparing browser authentication...')}
+              </p>
+              {browserAuthUrl && (
+                <button
+                  type="button"
+                  className="underline text-left hover:text-foreground"
+                  onClick={() => {
+                    const accomplish = getAccomplish();
+                    void accomplish.openExternal(browserAuthUrl);
+                  }}
+                >
+                  Open URL manually: {browserAuthUrl}
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-border" />
@@ -317,6 +386,50 @@ export function ClassicProviderForm({
                 transition={settingsTransitions.enter}
                 className="space-y-3"
               >
+                {supportsBrowserAuth && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleBrowserSignIn}
+                      disabled={signingIn}
+                      data-testid={`${providerId}-oauth-signin`}
+                      className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+                    >
+                      <img src={PROVIDER_LOGOS[providerId]} alt="" className="h-5 w-5" />
+                      {signingIn ? 'Signing in...' : `Login with ${meta.name}`}
+                    </button>
+
+                    {(browserAuthState !== 'idle' || browserAuthMessage || browserAuthUrl) && (
+                      <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
+                        <p>
+                          {browserAuthMessage ||
+                            (browserAuthState === 'polling'
+                              ? 'Waiting for browser authentication...'
+                              : 'Preparing browser authentication...')}
+                        </p>
+                        {browserAuthUrl && (
+                          <button
+                            type="button"
+                            className="underline text-left hover:text-foreground"
+                            onClick={() => {
+                              const accomplish = getAccomplish();
+                              void accomplish.openExternal(browserAuthUrl);
+                            }}
+                          >
+                            Open URL manually: {browserAuthUrl}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-px bg-border" />
+                      <span className="text-sm text-muted-foreground">or</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+                  </>
+                )}
+
                 <div className="flex gap-2">
                   <input
                     type="password"

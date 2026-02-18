@@ -171,12 +171,12 @@ Accomplish runs locally on your machine. Your files stay on your device, and you
 
 > **Takes 2 minutes to set up.**
 
-| Step  | Action              | Details                                                                                                           |
-| :---: | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **1** | **Install the App** | Download the DMG and drag it into Applications                                                                    |
-| **2** | **Connect Your AI** | Use your own Google, OpenAI, Anthropic (or other) API key — or sign in with ChatGPT (Plus/Pro). No subscriptions. |
-| **3** | **Give It Access**  | Choose which folders it can see. You stay in control.                                                             |
-| **4** | **Start Working**   | Ask it to summarize a doc, clean a folder, or create a report. You approve everything.                            |
+| Step  | Action              | Details                                                                                                                                      |
+| :---: | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1** | **Install the App** | Download the DMG and drag it into Applications                                                                                               |
+| **2** | **Connect Your AI** | Use your own Google, OpenAI, Anthropic (or other) API key — or sign in with browser auth (ChatGPT/Google where supported). No subscriptions. |
+| **3** | **Give It Access**  | Choose which folders it can see. You stay in control.                                                                                        |
+| **4** | **Start Working**   | Ask it to summarize a doc, clean a folder, or create a report. You approve everything.                                                       |
 
 <br />
 
@@ -216,7 +216,10 @@ A quick look at Accomplish on macOS, plus a short demo video.
 Yes. Accomplish runs locally on your machine and you control which folders it can access.
 
 **Do I need an API key?**  
-You can use your own API keys (OpenAI, Anthropic, Google, xAI, etc.) or run local models via Ollama.
+You can use your own API keys (OpenAI, Anthropic, Google, xAI, etc.) or run local models via Ollama. Browser auth is also available for supported providers.
+
+**How does browser auth work in the app?**  
+See `docs/browser-auth-gui-flow.md` for the GUI flow, state machine, and failure handling.
 
 **Is Accomplish free?**  
 Yes. Accomplish is open source and MIT licensed.

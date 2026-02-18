@@ -12,32 +12,37 @@ const path = require('path');
 
 const isWindows = process.platform === 'win32';
 const nodeModulesPath = path.join(__dirname, '..', 'node_modules');
-const accomplishPath = path.join(nodeModulesPath, '@accomplish_ai');
 
 // Save symlink targets for restoration
-const workspacePackages = ['agent-core'];
-const symlinkTargets = {};
+const workspacePackages = [
+  { scope: '@accomplish_ai', name: 'agent-core' },
+  { scope: '@accomplish', name: 'web' },
+];
+const symlinkTargets = [];
 
 try {
   // Check and remove workspace symlinks
   for (const pkg of workspacePackages) {
-    const pkgPath = path.join(accomplishPath, pkg);
+    const scopePath = path.join(nodeModulesPath, pkg.scope);
+    const pkgPath = path.join(scopePath, pkg.name);
     if (fs.existsSync(pkgPath)) {
       const stats = fs.lstatSync(pkgPath);
       if (stats.isSymbolicLink()) {
-        symlinkTargets[pkg] = fs.readlinkSync(pkgPath);
+        symlinkTargets.push({
+          scope: pkg.scope,
+          name: pkg.name,
+          path: pkgPath,
+          target: fs.readlinkSync(pkgPath),
+        });
         console.log('Temporarily removing workspace symlink:', pkgPath);
         fs.unlinkSync(pkgPath);
-      }
-    }
-  }
 
-  // Remove empty @accomplish_ai directory if it exists
-  if (Object.keys(symlinkTargets).length > 0) {
-    try {
-      fs.rmdirSync(accomplishPath);
-    } catch {
-      // Directory not empty or doesn't exist, ignore
+        try {
+          fs.rmdirSync(scopePath);
+        } catch {
+          // Directory not empty or doesn't exist, ignore
+        }
+      }
     }
   }
 
@@ -58,18 +63,17 @@ try {
   execSync(command, { stdio: 'inherit', cwd: path.join(__dirname, '..') });
 } finally {
   // Restore the symlinks
-  const packagesToRestore = Object.keys(symlinkTargets);
-  if (packagesToRestore.length > 0) {
+  if (symlinkTargets.length > 0) {
     console.log('Restoring workspace symlinks');
 
-    // Recreate @accomplish_ai directory if needed
-    if (!fs.existsSync(accomplishPath)) {
-      fs.mkdirSync(accomplishPath, { recursive: true });
-    }
+    for (const pkg of symlinkTargets) {
+      const scopePath = path.join(nodeModulesPath, pkg.scope);
+      const pkgPath = pkg.path;
+      const target = pkg.target;
 
-    for (const pkg of packagesToRestore) {
-      const pkgPath = path.join(accomplishPath, pkg);
-      const target = symlinkTargets[pkg];
+      if (!fs.existsSync(scopePath)) {
+        fs.mkdirSync(scopePath, { recursive: true });
+      }
 
       // On Windows, use junction instead of symlink (doesn't require admin privileges)
       // The target needs to be an absolute path for junctions

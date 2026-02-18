@@ -103,10 +103,15 @@ vi.mock('@main/opencode', () => ({
   getOpenCodeCliVersion: vi.fn(() => Promise.resolve('1.0.0')),
 }));
 
-// Mock OpenCode auth (ChatGPT OAuth) - used by handlers.ts for OpenAI OAuth
-vi.mock('@main/opencode/auth', () => ({
-  getOpenAiOauthStatus: vi.fn(() => ({ connected: false })),
+// Mock OpenCode browser auth flow
+vi.mock('@main/opencode/auth-browser', () => ({
   loginOpenAiWithChatGpt: vi.fn(() => Promise.resolve({ openedUrl: undefined })),
+  loginWithBrowser: vi.fn(() =>
+    Promise.resolve({
+      openedUrl: 'https://auth.example.com',
+      detectedUrl: 'https://auth.example.com',
+    }),
+  ),
 }));
 
 // Mock task history (stored in test state)
@@ -470,6 +475,7 @@ describe('IPC Handlers Integration', () => {
       // OpenCode handlers
       expect(handlers.has('opencode:check')).toBe(true);
       expect(handlers.has('opencode:version')).toBe(true);
+      expect(handlers.has('opencode:auth:browser:login')).toBe(true);
 
       // Model handlers
       expect(handlers.has('model:get')).toBe(true);
@@ -1150,6 +1156,17 @@ describe('IPC Handlers Integration', () => {
 
       // Assert
       expect(result).toBe('1.0.0');
+    });
+
+    it('opencode:auth:browser:login should start browser auth flow', async () => {
+      const result = (await invokeHandler('opencode:auth:browser:login', 'google')) as {
+        ok: boolean;
+        openedUrl?: string;
+        detectedUrl?: string;
+      };
+
+      expect(result.ok).toBe(true);
+      expect(result.detectedUrl).toContain('https://auth.example.com');
     });
   });
 

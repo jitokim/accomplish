@@ -82,6 +82,9 @@ interface AccomplishAPI {
   setOpenAiBaseUrl(baseUrl: string): Promise<void>;
   getOpenAiOauthStatus(): Promise<{ connected: boolean; expires?: number }>;
   loginOpenAiWithChatGpt(): Promise<{ ok: boolean; openedUrl?: string }>;
+  startOpenCodeBrowserAuthLogin(
+    provider: 'openai' | 'google',
+  ): Promise<{ ok: boolean; openedUrl?: string; detectedUrl?: string }>;
 
   // API Key management
   hasApiKey(): Promise<boolean>;
@@ -318,6 +321,14 @@ interface AccomplishAPI {
   onTaskSummary?(callback: (data: { taskId: string; summary: string }) => void): () => void;
   onTodoUpdate?(callback: (data: { taskId: string; todos: TodoItem[] }) => void): () => void;
   onAuthError?(callback: (data: { providerId: string; message: string }) => void): () => void;
+  onOpenCodeBrowserAuthProgress?(
+    callback: (data: {
+      state: 'idle' | 'waiting_browser_auth' | 'polling' | 'success' | 'failed' | 'timeout';
+      provider: 'openai' | 'google';
+      message?: string;
+      url?: string;
+    }) => void,
+  ): () => void;
 
   // Speech-to-Text
   speechIsConfigured(): Promise<boolean>;

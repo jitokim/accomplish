@@ -196,7 +196,7 @@ export interface VertexProviderCredentials {
 
 export interface OAuthCredentials {
   type: 'oauth';
-  oauthProvider: 'chatgpt';
+  oauthProvider: 'chatgpt' | 'google';
 }
 
 export type ProviderCredentials =
